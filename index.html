@@ -1,1 +1,402 @@
+<!DOCTYPE html>
+<html>
+<head>
+<title>Bitcoin Sim</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
 
+<style>
+
+body{
+    background:#0f0f0f;
+    color:white;
+    font-family:Arial;
+    text-align:center;
+    overflow:hidden;
+}
+
+button,input{
+    padding:10px;
+    margin:6px;
+    font-size:16px;
+}
+
+#chartContainer{
+    width:60%;
+    height:350px;
+    margin:auto;
+}
+
+canvas{
+    background:#1a1a1a;
+    width:100%;
+    height:100%;
+}
+
+/* Panels */
+
+.panel{
+    position:absolute;
+    background:#222;
+    padding:15px;
+    border-radius:12px;
+    cursor:grab;
+    user-select:none;
+}
+
+#aiPanel{
+    left:20px;
+    top:80px;
+    width:220px;
+    max-height:400px;
+    overflow-y:auto;
+}
+
+#leaderboardPanel{
+    right:20px;
+    bottom:20px;
+    width:260px;
+    max-height:400px;
+    overflow-y:auto;
+}
+
+</style>
+</head>
+
+<body>
+
+<h1>₿ Bitcoin Sim</h1>
+
+<h2 id="price"></h2>
+<h3 id="money"></h3>
+<h3 id="btc"></h3>
+<h3 id="portfolio"></h3>
+
+<input type="number" id="amount" placeholder="BTC amount" step="0.01" oninput="updateCost()">
+<p id="costDisplay">Cost: $0</p>
+
+<button onclick="buyBTC()">Buy</button>
+<button onclick="sellBTC()">Sell</button>
+<button onclick="mineBTC()">Mine BTC</button>
+<button onclick="resetProgress()">🔄 Reset Progress</button>
+
+<div id="chartContainer">
+<canvas id="chart"></canvas>
+</div>
+
+<div id="aiPanel" class="panel">
+<h3>🤖 AI Traders</h3>
+<div id="aiInfo"></div>
+</div>
+
+<div id="leaderboardPanel" class="panel">
+<h3>🏆 Leaderboard</h3>
+<div id="leaderboard"></div>
+</div>
+
+<script>
+
+/* ===== PLAYER ===== */
+
+let price=20000;
+let money=30000;
+let btc=0;
+
+/* ===== MARKET ===== */
+
+let history=[];
+let labels=[];
+let tick=0;
+
+/* ===== AI ===== */
+
+let aiTraders=[];
+
+function generateAI(){
+aiTraders=[];
+for(let i=0;i<8;i++){
+aiTraders.push({
+money:Math.random()*100000+10000,
+btc:0,
+tradeSize:Math.random()*3+0.5
+});
+}
+}
+
+/* ===== CHART ===== */
+
+const ctx=document.getElementById("chart").getContext("2d");
+
+const chart=new Chart(ctx,{
+type:"line",
+data:{
+labels:labels,
+datasets:[{
+label:"BTC Price",
+data:history,
+borderColor:"orange",
+borderWidth:3,
+fill:false
+}]
+},
+options:{
+responsive:true,
+maintainAspectRatio:false
+}
+});
+
+/* ===== DRAG SYSTEM ===== */
+
+let draggedPanel=null;
+let offsetX=0;
+let offsetY=0;
+
+document.querySelectorAll(".panel").forEach(panel=>{
+panel.addEventListener("mousedown",e=>{
+if(e.target.tagName==="INPUT"||e.target.tagName==="BUTTON") return;
+
+draggedPanel=panel;
+offsetX=e.clientX-panel.offsetLeft;
+offsetY=e.clientY-panel.offsetTop;
+
+panel.style.cursor="grabbing";
+});
+});
+
+document.addEventListener("mousemove",e=>{
+if(!draggedPanel) return;
+
+draggedPanel.style.left=(e.clientX-offsetX)+"px";
+draggedPanel.style.top=(e.clientY-offsetY)+"px";
+});
+
+document.addEventListener("mouseup",()=>{
+if(draggedPanel){
+draggedPanel.style.cursor="grab";
+}
+draggedPanel=null;
+});
+
+/* ===== SAVE SYSTEM ===== */
+
+function saveGame(){
+localStorage.setItem("btcSave",JSON.stringify({
+price,money,btc,aiTraders,history,labels,tick
+}));
+}
+
+function loadGame(){
+
+const saved=localStorage.getItem("btcSave");
+
+if(!saved){
+generateAI();
+return;
+}
+
+const data=JSON.parse(saved);
+
+price=data.price;
+money=data.money;
+btc=data.btc;
+aiTraders=data.aiTraders;
+history=data.history;
+labels=data.labels;
+tick=data.tick;
+
+chart.data.labels=labels;
+chart.data.datasets[0].data=history;
+chart.update();
+}
+
+/* ===== UI ===== */
+
+function updateCost(){
+let amount=parseFloat(document.getElementById("amount").value);
+if(isNaN(amount)) amount=0;
+
+document.getElementById("costDisplay").innerText=
+"Cost: $"+(amount*price).toFixed(2);
+}
+
+function updateAiDisplay(){
+
+let html="";
+
+aiTraders.forEach((trader,i)=>{
+let portfolio=trader.money+trader.btc*price;
+
+html+=`
+<p>
+Trader ${i+1}<br>
+💰 $${trader.money.toFixed(2)}<br>
+₿ ${trader.btc.toFixed(4)}<br>
+📊 $${portfolio.toFixed(2)}
+</p><hr>
+`;
+});
+
+document.getElementById("aiInfo").innerHTML=html;
+}
+
+function updateLeaderboard(){
+
+let players=[];
+players.push({
+name:"You",
+value:money+btc*price
+});
+
+aiTraders.forEach((t,i)=>{
+players.push({
+name:"Trader "+(i+1),
+value:t.money+t.btc*price
+});
+});
+
+players.sort((a,b)=>b.value-a.value);
+
+let html="";
+players.forEach(p=>{
+html+=`<p>${p.name}<br>💰 $${p.value.toFixed(2)}</p><hr>`;
+});
+
+document.getElementById("leaderboard").innerHTML=html;
+}
+
+/* ===== MARKET ===== */
+
+function aiTrade(){
+
+aiTraders.forEach(trader=>{
+
+if(price<18000 && trader.money>price){
+let buy=trader.tradeSize;
+let cost=buy*price;
+
+if(trader.money>=cost){
+trader.money-=cost;
+trader.btc+=buy;
+}
+}
+
+if(price>23000 && trader.btc>0){
+let sell=trader.tradeSize;
+
+trader.btc-=sell;
+trader.money+=sell*price;
+}
+
+});
+}
+
+function randomEvent(){
+
+let roll=Math.random();
+
+if(roll<0.1) price*=0.7;
+else if(roll>0.9) price*=1.3;
+
+if(price<500) price=500;
+}
+
+/* ===== LOOP ===== */
+
+function changePrice(){
+
+tick++;
+
+let change=(Math.random()-0.5)*8;
+price+=price*(change/100);
+
+randomEvent();
+aiTrade();
+
+history.push(price);
+labels.push("T"+tick);
+
+if(history.length>60){
+history.shift();
+labels.shift();
+}
+
+chart.update();
+updateDisplay();
+saveGame();
+}
+
+/* ===== PLAYER ===== */
+
+function buyBTC(){
+let amount=parseFloat(document.getElementById("amount").value);
+if(isNaN(amount)||amount<=0) return;
+
+let cost=amount*price;
+if(money<cost){alert("Not enough money");return;}
+
+money-=cost;
+btc+=amount;
+
+updateDisplay();
+saveGame();
+}
+
+function sellBTC(){
+let amount=parseFloat(document.getElementById("amount").value);
+if(isNaN(amount)||amount<=0) return;
+
+if(btc<amount){alert("Not enough BTC");return;}
+
+btc-=amount;
+money+=amount*price;
+
+updateDisplay();
+saveGame();
+}
+
+function mineBTC(){
+if(Math.random()>0.7){
+btc+=Math.random()*0.05;
+}
+updateDisplay();
+saveGame();
+}
+
+/* ===== RESET ===== */
+
+function resetProgress(){
+if(!confirm("Reset ONLY your progress?")) return;
+
+money=30000;
+btc=0;
+
+updateDisplay();
+saveGame();
+}
+
+/* ===== DISPLAY ===== */
+
+function updateDisplay(){
+
+document.getElementById("price").innerText="BTC Price: $"+price.toFixed(2);
+document.getElementById("money").innerText="Money: $"+money.toFixed(2);
+document.getElementById("btc").innerText="BTC: "+btc.toFixed(4);
+document.getElementById("portfolio").innerText=
+"Portfolio: $"+(money+btc*price).toFixed(2);
+
+updateAiDisplay();
+updateLeaderboard();
+}
+
+/* ===== START ===== */
+
+loadGame();
+generateAI();
+
+updateDisplay();
+changePrice();
+setInterval(changePrice,10000);
+
+</script>
+
+</body>
+</html>
